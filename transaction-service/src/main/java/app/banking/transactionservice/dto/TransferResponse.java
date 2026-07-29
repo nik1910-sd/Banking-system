@@ -1,5 +1,8 @@
-package app.banking.transactionservice.entity;
+package app.banking.transactionservice.dto;
 
+
+import app.banking.transactionservice.entity.TransactionStatus;
+import app.banking.transactionservice.entity.TransactionType;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -10,33 +13,23 @@ import org.hibernate.annotations.CreationTimestamp;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
-@Entity
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name="transactions")
-public class Transaction {
+public class TransferResponse {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
+
     private String id;
 
-    @Column(nullable=false)
     private String senderAccountNumber;
 
-    @Column(nullable=false)
     private String receiverAccountNumber;
 
-    @Column(nullable=false, precision=10, scale=2)
     private BigDecimal amount;
 
-    @Enumerated(EnumType.STRING)
-    @Column(nullable=false)
     private TransactionType type;
 
-    @Enumerated(EnumType.STRING)
-    @Column(nullable=false)
     private TransactionStatus status;
 
     private String description;
@@ -45,11 +38,7 @@ public class Transaction {
 
     private String referenceNumber;
 
-    @CreationTimestamp
     private LocalDateTime createdAt;
 
-
     private LocalDateTime completedAt;
-
-
 }
