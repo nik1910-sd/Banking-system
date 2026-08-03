@@ -50,6 +50,11 @@ public class AccountController {
         return ResponseEntity.ok("Account blocked successfully");
     }
 
+    /**
+     * SAGA STEP 1 — Deduct balance.
+     * Called by Transaction Service when transfer is initiated.
+     */
+
     @PutMapping("/{accountNumber}/deduct")
     public ResponseEntity<String> deductBalance(
             @PathVariable String accountNumber,
@@ -58,6 +63,13 @@ public class AccountController {
         accountService.deductBalance(accountNumber,amount);
         return ResponseEntity.ok("Balance deducted successfully");
     }
+
+    /**
+     * SAGA STEP 4 -COMPENSATING TRANSACTION ENDPOINT
+     * CALLED BY TRANSACTION IN TWO SCENARIOS:
+     * 1.FRAUD DETECTED->REFUND SENDER
+     * 2.TRANSACTION COMPLETED->CREDIT RECEIVER
+     */
 
     @PutMapping("/{accountNumber}/credit")
     public ResponseEntity<String>  creditBalance(
