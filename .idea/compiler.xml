@@ -2,7 +2,16 @@
 <project version="4">
   <component name="CompilerConfiguration">
     <annotationProcessing>
-      <profile name="Annotation profile for fraud-detection-service" enabled="true">
+      <profile default="true" name="Default" enabled="true" />
+      <profile name="Maven default annotation processors profile" enabled="true">
+        <sourceOutputDir name="target/generated-sources/annotations" />
+        <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
+        <outputRelativeToContentRoot value="true" />
+        <module name="account-service" />
+        <module name="Eureka" />
+        <module name="fraud-detection-service" />
+      </profile>
+      <profile name="Annotation profile for notification-service" enabled="true">
         <sourceOutputDir name="target/generated-sources/annotations" />
         <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
         <outputRelativeToContentRoot value="true" />
@@ -11,15 +20,14 @@
         </processorPath>
         <module name="transaction-service" />
         <module name="payment-service" />
-        <module name="account-service" />
         <module name="api-gateway-service" />
         <module name="notification-service" />
-        <module name="fraud-detection-service" />
       </profile>
     </annotationProcessing>
   </component>
   <component name="JavacSettings">
     <option name="ADDITIONAL_OPTIONS_OVERRIDE">
+      <module name="Eureka" options="-parameters" />
       <module name="account-service" options="-parameters" />
       <module name="api-gateway-service" options="-parameters" />
       <module name="fraud-detection-service" options="-parameters" />
