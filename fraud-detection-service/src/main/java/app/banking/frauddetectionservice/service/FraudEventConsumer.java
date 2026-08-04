@@ -11,7 +11,7 @@ import java.util.Map;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-public class TransactionEventConsumer {
+public class FraudEventConsumer {
 
    private final FraudDetectionService  service;
 
@@ -25,7 +25,7 @@ public class TransactionEventConsumer {
                payload.get("transactionId"));
 
        try{
-          service.checkTranaction(payload);
+          service.checkTransaction(payload);
        } catch (Exception e) {
            log.error("Error in fraud detection: {}", e.getMessage());
        }

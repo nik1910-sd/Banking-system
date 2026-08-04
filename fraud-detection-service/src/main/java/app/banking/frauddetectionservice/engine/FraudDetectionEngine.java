@@ -28,7 +28,7 @@ public class FraudDetectionEngine {
     private double maxBalancePercentage;
 
 
-    private FraudCheckResult performFraudChecks(
+    public FraudCheckResult performFraudChecks(
             String accountNumber,
             BigDecimal amount,
             BigDecimal senderBalance){
@@ -83,7 +83,6 @@ public class FraudDetectionEngine {
         BigDecimal threshold = avgAmount.multiply(
                 BigDecimal.valueOf(suspiciousAmountMultiplier));
 
-        // Update running average
         BigDecimal newAvg = avgAmount.add(amount)
                 .divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP);
 
@@ -105,10 +104,5 @@ public class FraudDetectionEngine {
         return amount.compareTo(maxAllowed) > 0;
 
     }
-
-
-
-
-
 
 }
