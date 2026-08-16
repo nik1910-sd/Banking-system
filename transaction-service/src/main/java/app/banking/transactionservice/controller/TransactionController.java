@@ -2,7 +2,7 @@ package app.banking.transactionservice.controller;
 
 
 import app.banking.transactionservice.dto.TransferRequest;
-import app.banking.transactionservice.dto.TransferResponse;
+import app.banking.transactionservice.dto.TransactionResponse;
 import app.banking.transactionservice.service.TransactionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -22,7 +22,7 @@ public class TransactionController {
     private final TransactionService transactionService;
 
     @PostMapping("/transfer")
-    public ResponseEntity<TransferResponse> transfer(
+    public ResponseEntity<TransactionResponse> transfer(
            @Valid @RequestBody TransferRequest request) {
 
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -30,22 +30,23 @@ public class TransactionController {
     }
 
     @GetMapping("/{transactionId}")
-    public ResponseEntity<TransferResponse> getTransaction(
+    public ResponseEntity<TransactionResponse> getTransaction(
             @PathVariable String transactionId){
         return ResponseEntity.ok(transactionService.getTransaction(transactionId));
     }
 
     @GetMapping("/account/{accountNumber}")
-    public ResponseEntity<List<TransferResponse>> getTransactionHistory(
+    public ResponseEntity<List<TransactionResponse>> getTransactionHistory(
             @PathVariable String accountNumber){
         return ResponseEntity.ok(transactionService.getTransactionHistory(accountNumber));
     }
 
     @PostMapping("/{transactionId}/verify")
-    public ResponseEntity<TransferResponse> verifyOTP(
+    public ResponseEntity<TransactionResponse> verifyOTP(
             @PathVariable String transactionId,
             @RequestParam String otp){
-
+        log.info("OTP verification request — transaction: {}",
+                transactionId);
         return ResponseEntity.ok(transactionService.verifyOTP(transactionId,otp));
     }
 

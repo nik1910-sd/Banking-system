@@ -1,172 +1,102 @@
 package app.banking.transactionservice.service;
 
 
+import app.banking.transactionservice.entity.Transaction;
+import app.banking.transactionservice.entity.TransactionStatus;
+import app.banking.transactionservice.repository.TransactionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Service;
 
+import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
+
 
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class TransactionEventConsumer {
 
+    private final TransactionRepository transactionRepository;
+    private final RedisTemplate<String, String> redisTemplate;
+    private final TransactionService transactionService;
+    private static final long OTP_EXPIRY_MINUTES = 5;
 
+    private final KafkaTemplate<String, Object> kafkaTemplate;
 
-    /**
-     * Transaction completed — debit sender, credit receiver.
-     */
-    @KafkaListener(topics = "transaction.completed")
-    public void consumeTransactionCompleted(
-            @Payload Map<String, Object> payload) {
-        try {
-            String senderAccount = (String) payload
-                    .get("senderAccountNumber");
-            String receiverAccount = (String) payload
-                    .get("receiverAccountNumber");
-            String amount = payload.get("amount").toString();
+    private static final String TRANSACTION_OTP_GENERATED_TOPIC = "transaction.otp.generated";
 
-            sendAlert(senderAccount, "DEBIT ALERT",
-                    String.format("₹%s debited from account %s",
-                            amount, senderAccount));
+    @KafkaListener(topics = "verification.required")
+    public void consumeVerificationRequired(
+            @Payload Map<String, Object> payload){
 
-            sendAlert(receiverAccount, "CREDIT ALERT",
-                    String.format("₹%s credited to account %s",
-                            amount, receiverAccount));
+        try{
 
-        } catch (Exception e) {
-            log.error("Error sending transaction notification: {}",
-                    e.getMessage());
-        }
-    }
-
-
-    @KafkaListener(topics = "fraud.detected")
-    public void consumeFraudDetected(
-            @Payload Map<String, Object> payload) {
-        try {
+            String transactionId =  (String) payload.get("transactionId");
             String accountNumber = (String) payload.get("accountNumber");
-            String reason = (String) payload.get("reason");
+            String reason =  (String) payload.get("reason");
 
-            sendAlert(accountNumber,
-                    "🚨 ACCOUNT BLOCKED",
-                    String.format(
-                            "Your account %s has been blocked. " +
-                                    "Reason: %s. " +
-                                    "Please contact your bank immediately.",
-                            accountNumber, reason));
+            log.info("Verification required - transaction: {} reason: {}",
+                    transactionId, reason);
 
-        } catch (Exception e) {
-            log.error("Error sending fraud alert: {}", e.getMessage());
+            Transaction transaction = transactionRepository.findById(transactionId)
+                    .orElseThrow(() -> new RuntimeException(
+                            "Transaction not found " + transactionId
+                    ));
+
+            if(transaction.getStatus() != TransactionStatus.PROCESSING){
+                log.warn("Transaction {} not PROCESSING - skipping", transactionId);
+                return;
+            }
+
+            // Generate 6 digit otp
+            String otp = String.format("%06d", (int) (Math.random() * 900000) + 100000);
+
+            // Store OTP in Redis - expires in 5 minutes
+            String otpKey = "verification:otp" + transactionId;
+            redisTemplate.opsForValue().set(otpKey, otp, OTP_EXPIRY_MINUTES, TimeUnit.MINUTES);
+
+            // Update Status
+            transaction.setStatus(TransactionStatus.PENDING_VERIFICATION);
+            transactionRepository.save(transaction);
+
+            log.info("OTP generated for transaction: {} expires in {} min",
+                    transactionId, OTP_EXPIRY_MINUTES);
+
+            // Notify user
+            Map<String, Object> otpEvent = new HashMap<>();
+            otpEvent.put("transactionId", transactionId);
+            otpEvent.put("accountNumber", accountNumber);
+            otpEvent.put("reason", reason);
+            otpEvent.put("otp", otp);
+            otpEvent.put("amount", payload.get("amount"));
+
+            kafkaTemplate.send(TRANSACTION_OTP_GENERATED_TOPIC, transactionId, otpEvent);
+
+        }
+        catch(Exception e){
+            log.error("Error handling verification required: {}", e.getMessage());
+        }
+    }
+
+    @KafkaListener(topics = "fraud.check.clean")
+    public void consumeFraudCheckCleanResult(
+            @Payload Map<String, Object> payload){
+
+        try{
+
+            String transactionId =  (String) payload.get("transactionId");
+            transactionService.processCleanResult(transactionId);
+        }
+        catch(Exception e){
+            log.error("Error processing fraud check result: {}", e.getMessage());
         }
     }
 
 
-    @KafkaListener(topics = "transaction.otp.generated")
-    public void consumeOtpGenerated(
-            @Payload Map<String, Object> payload) {
-        try {
-            String accountNumber = (String) payload.get("accountNumber");
-            String otp = (String) payload.get("otp");
-            String transactionId = (String) payload.get("transactionId");
-            String amount = payload.get("amount").toString();
-            String reason = (String) payload.get("reason");
-
-            sendAlert(accountNumber,
-                    "🔐 TRANSACTION VERIFICATION REQUIRED",
-                    String.format(
-                            "Suspicious activity detected on your account. " +
-                                    "Reason: %s. " +
-                                    "A transaction of ₹%s is pending verification. " +
-                                    "Your OTP is: %s. Valid for 5 minutes. " +
-                                    "If this wasn't you — ignore this message. " +
-                                    "Transaction will be cancelled and amount refunded automatically.",
-                            reason, amount, otp, transactionId, otp));
-
-        } catch (Exception e) {
-            log.error("Error sending OTP notification: {}",
-                    e.getMessage());
-        }
-    }
-
-
-    @KafkaListener(topics = "transaction.refunded")
-    public void consumeTransactionRefunded(
-            @Payload Map<String, Object> payload) {
-        try {
-            String senderAccount = (String) payload
-                    .get("senderAccountNumber");
-            String amount = payload.get("amount").toString();
-            String reason = (String) payload.get("reason");
-
-            sendAlert(senderAccount, "💰 REFUND PROCESSED",
-                    String.format(
-                            "Your transaction of ₹%s was cancelled. " +
-                                    "Reason: %s. " +
-                                    "₹%s has been refunded to account %s.",
-                            amount, reason, amount, senderAccount));
-
-        } catch (Exception e) {
-            log.error("Error sending refund notification: {}",
-                    e.getMessage());
-        }
-    }
-
-    /**
-     * Payment completed via Razorpay.
-     */
-    @KafkaListener(topics = "payment.completed")
-    public void consumePaymentCompleted(
-            @Payload Map<String, Object> payload) {
-        try {
-            String accountNumber = (String) payload.get("accountNumber");
-            String amount = payload.get("amount").toString();
-
-            sendAlert(accountNumber, "PAYMENT SUCCESSFUL",
-                    String.format(
-                            "Payment of ₹%s completed. " +
-                                    "Razorpay ID: %s",
-                            amount, payload.get("razorpayPaymentId")));
-
-        } catch (Exception e) {
-            log.error("Error sending payment notification: {}",
-                    e.getMessage());
-        }
-    }
-
-    /**
-     * Payment failed via Razorpay.
-     */
-    @KafkaListener(topics = "payment.failed")
-    public void consumePaymentFailed(
-            @Payload Map<String, Object> payload) {
-        try {
-            String accountNumber = (String) payload.get("accountNumber");
-            String amount = payload.get("amount").toString();
-
-            sendAlert(accountNumber, "❌ PAYMENT FAILED",
-                    String.format(
-                            "Your payment of ₹%s could not be processed. " +
-                                    "Please try again or contact support.",
-                            amount));
-
-        } catch (Exception e) {
-            log.error("Error sending payment failure notification: {}",
-                    e.getMessage());
-        }
-    }
-
-    private void sendAlert(String accountNumber,
-                           String subject,
-                           String message) {
-        log.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        log.info("NOTIFICATION SENT");
-        log.info("Account : {}", accountNumber);
-        log.info("Subject : {}", subject);
-        log.info("Message : {}", message);
-        log.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    }
 }
