@@ -22,15 +22,15 @@ public class AccountEventConsumer{
          @Payload Map<String, Object> payload){
 
      try{
-         String recieverAccountNumber = (String) payload.get("recieverAccountNumber");
+         String receiverAccountNumber = (String) payload.get("receiverAccountNumber");
          BigDecimal amount = new BigDecimal( payload.get("amount").toString());
 
-         log.info("Crediting account: {} amount: {}", recieverAccountNumber, amount);
-         accountService.creditBalance(recieverAccountNumber, amount);
+         log.info("Crediting account: {} amount: {}", receiverAccountNumber, amount);
+         accountService.creditBalance(receiverAccountNumber, amount);
 
      }
      catch(Exception e){
-         log.info(" Error crediting account: {}",e.getMessage());
+         log.error(" Error crediting account: {}",e.getMessage());
      }
     }
 
@@ -39,14 +39,14 @@ public class AccountEventConsumer{
          @Payload Map<String, Object> payload){
 
         try{
-         String recieverAccountNumber = (String) payload.get("recieverAccountNumber");
+         String senderAccountNumber = (String) payload.get("senderAccountNumber");
 
-         log.info("Fraud detected-blocking account: {} ", recieverAccountNumber);
-         accountService.blockAccount(recieverAccountNumber);
+         log.info("Fraud detected-blocking account: {} ", senderAccountNumber);
+         accountService.blockAccount(senderAccountNumber);
         }
 
         catch (Exception e) {
-            log.info("Error crediting account: {}",e.getMessage());
+            log.error("Error blocking account: {}",e.getMessage());
         }
     }
 

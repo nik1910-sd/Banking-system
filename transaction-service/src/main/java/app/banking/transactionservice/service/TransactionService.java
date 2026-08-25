@@ -8,6 +8,8 @@ import app.banking.transactionservice.entity.TransactionStatus;
 import app.banking.transactionservice.entity.TransactionType;
 import app.banking.transactionservice.event.TransactionCompletedEvent;
 import app.banking.transactionservice.event.TransactionInitiatedEvent;
+import app.banking.transactionservice.exception.EventPublishException;
+import app.banking.transactionservice.exception.TransactionNotFoundException;
 import app.banking.transactionservice.repository.TransactionRepository;
 import lombok.*;
 import lombok.extern.slf4j.Slf4j;
@@ -20,6 +22,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 
@@ -39,6 +42,8 @@ public class TransactionService {
     private static final String TRANSACTION_COMPLETED_TOPIC = "transaction.completed";
     private static final String TRANSACTION_REFUNDED_TOPIC = "transaction.refunded";
     private static final String FRAUD_DETECTED_TOPIC = "fraud.detected";
+
+    private static final long KAFKA_ACK_TIMEOUT_SECONDS = 10;
 
 
     public TransactionResponse transfer(TransferRequest request){
@@ -74,18 +79,47 @@ public class TransactionService {
                 savedTransaction.getDescription()
         );
 
-        kafkaTemplate.send(TRANSACTION_INITIATED_TOPIC, savedTransaction.getId(), event);
+        // The sender is already debited at this point, so a dropped publish would
+        // strand the money in PROCESSING forever. Block on the broker ack and
+        // roll the debit back if it never arrives.
+        try{
+            kafkaTemplate.send(TRANSACTION_INITIATED_TOPIC, savedTransaction.getId(), event)
+                    .get(KAFKA_ACK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        }
+        catch(InterruptedException e){
+            Thread.currentThread().interrupt();
+            rollBackUnstartedTransfer(savedTransaction, e);
+        }
+        catch(Exception e){
+            rollBackUnstartedTransfer(savedTransaction, e);
+        }
+
         log.info("SAGA STEP 2 - TransactionInitiatedEvent published: {}", savedTransaction.getId());
 
         return mapToResponse(savedTransaction);
     }
 
+    /**
+     * SAGA STEP 2 never reached the broker, so no fraud check will ever run for
+     * this transfer. Refund the sender, mark it FAILED and surface the failure.
+     */
+    private void rollBackUnstartedTransfer(Transaction transaction, Exception cause){
+
+        log.error("SAGA STEP 2 FAILED - could not publish {}: {}",
+                transaction.getId(), cause.getMessage());
+
+        compensate(transaction, TransactionStatus.FAILED,
+                "Fraud check could not be started - " + cause.getMessage());
+
+        throw new EventPublishException(
+                "Transfer aborted before fraud check could start - amount refunded",
+                cause);
+    }
+
     public TransactionResponse getTransaction(String transactionId){
         return mapToResponse(transactionRepository
                 .findById(transactionId)
-                .orElseThrow(() ->  new RuntimeException(
-                        "Transaction not found: "+transactionId
-                )));
+                .orElseThrow(() ->  new TransactionNotFoundException(transactionId)));
     }
 
     public List<TransactionResponse> getTransactionHistory(String accountNumber){
@@ -101,9 +135,7 @@ public class TransactionService {
         log.info("OTP verification for the transaction: {}", transactionID);
 
         Transaction transaction = transactionRepository.findById(transactionID)
-                .orElseThrow(() -> new RuntimeException(
-                        "Transaction not found "+transactionID
-                ));
+                .orElseThrow(() -> new TransactionNotFoundException(transactionID));
 
         String otpKey = "verification:otp" + transactionID;
         String storedOtp = redisTemplate.opsForValue().get(otpKey);
@@ -134,6 +166,17 @@ public class TransactionService {
     }
 
     private void compensateTransaction(Transaction transaction, String reason) {
+        compensate(transaction, TransactionStatus.FLAGGED, reason);
+    }
+
+    /**
+     * Refunds the sender and parks the transaction in {@code finalStatus}.
+     * FLAGGED is used when a fraud rule rejected the transfer; FAILED when the
+     * saga could not run at all.
+     */
+    private void compensate(Transaction transaction,
+                            TransactionStatus finalStatus,
+                            String reason) {
         log.warn("SAGA COMPENSATION - refunding: {} amount: {}",
                 transaction.getSenderAccountNumber(),
                 transaction.getAmount());
@@ -143,7 +186,7 @@ public class TransactionService {
                 transaction.getSenderAccountNumber(),
                 transaction.getAmount());
 
-        transaction.setStatus(TransactionStatus.FLAGGED);
+        transaction.setStatus(finalStatus);
         transaction.setFailureReason(reason +
                 " - SAGA Compensation executed, amount refunded at "+ LocalDateTime.now());
 
@@ -156,7 +199,7 @@ public class TransactionService {
         refundEvent.put("amount", transaction.getAmount());
         refundEvent.put("reason", reason);
 
-        kafkaTemplate.send(TRANSACTION_REFUNDED_TOPIC, transaction.getId(), refundEvent);
+        publish(TRANSACTION_REFUNDED_TOPIC, transaction.getId(), refundEvent);
 
         log.info("SAGA COMPENSATION COMPLETE - {} refunded to  {}",
                 transaction.getAmount(), transaction.getSenderAccountNumber());
@@ -167,10 +210,10 @@ public class TransactionService {
         // Publish fraud.detected -> Account Service will block account
         Map<String, Object> fraudEvent = new HashMap<>();
         fraudEvent.put("transactionId", transaction.getId());
-        fraudEvent.put("accountNumber", transaction.getSenderAccountNumber());
+        fraudEvent.put("senderAccountNumber", transaction.getSenderAccountNumber());
         fraudEvent.put("reason", reason);
 
-        kafkaTemplate.send(FRAUD_DETECTED_TOPIC, transaction.getSenderAccountNumber(), fraudEvent);
+        publish(FRAUD_DETECTED_TOPIC, transaction.getSenderAccountNumber(), fraudEvent);
         log.warn("fraud.detected published - account: {} will be blocked, Kindly contact to the bank",
                 transaction.getSenderAccountNumber());
 
@@ -191,18 +234,36 @@ public class TransactionService {
                 transaction.getDescription()
         );
 
-        kafkaTemplate.send(TRANSACTION_COMPLETED_TOPIC, transaction.getId(), completedEvent);
+        publish(TRANSACTION_COMPLETED_TOPIC, transaction.getId(), completedEvent);
 
         log.info("SAGA COMPLETE - Transaction {} completed",
                 transaction.getId());
     }
 
+    /**
+     * Fire-and-forget publish for post-commit events. These cannot be rolled
+     * back, so a failure is logged loudly rather than swallowed - a dropped
+     * transaction.completed means the receiver is never credited.
+     */
+    private void publish(String topic, String key, Object event){
+        kafkaTemplate.send(topic, key, event)
+                .whenComplete((result, ex) -> {
+                    if(ex != null){
+                        log.error("PUBLISH FAILED - topic: {} key: {} - downstream " +
+                                "consumers will not see this event", topic, key, ex);
+                    }
+                    else{
+                        log.debug("Published to {} partition {} offset {}", topic,
+                                result.getRecordMetadata().partition(),
+                                result.getRecordMetadata().offset());
+                    }
+                });
+    }
+
     public void processCleanResult(String transactionID){
 
         Transaction transaction = transactionRepository.findById(transactionID)
-                .orElseThrow(() -> new RuntimeException(
-                        "Transaction not found "+transactionID
-                ));
+                .orElseThrow(() -> new TransactionNotFoundException(transactionID));
 
         if(transaction.getStatus() != TransactionStatus.PROCESSING){
             log.warn("Transaction {} not PROCESSING - skipping", transactionID);

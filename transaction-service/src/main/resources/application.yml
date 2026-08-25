@@ -14,7 +14,7 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect
   kafka:
-    bootstrap-servers: localhost:29092
+    bootstrap-servers: localhost:9092
     consumer:
       group-id: transaction-service-group
       auto-offset-reset: earliest
@@ -56,3 +56,5 @@ eureka:
   client:
     register-with-eureka: true
     fetch-registry: true
+  instance:
+    prefer-ip-address: true

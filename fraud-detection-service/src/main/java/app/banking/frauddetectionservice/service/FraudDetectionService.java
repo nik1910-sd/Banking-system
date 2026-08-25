@@ -32,10 +32,14 @@ public class FraudDetectionService {
         String accountNumber = (String) payload.get("senderAccountNumber");
         BigDecimal amount = new BigDecimal(payload.get("amount").toString());
 
-        BigDecimal senderBalance = accountServiceClient.getBalance(accountNumber);
+        // SAGA STEP 1 already debited the sender, so getBalance() returns the
+        // post-debit figure. Add the amount back to recover the balance the
+        // transaction was actually made against - that is what the rules measure.
+        BigDecimal balanceAfterDebit = accountServiceClient.getBalance(accountNumber);
+        BigDecimal senderBalance = balanceAfterDebit.add(amount);
 
-        log.info("Checking transaction: {} account: {} amount: {} balance: {}",
-                transactionId, accountNumber, amount, senderBalance);
+        log.info("Checking transaction: {} account: {} amount: {} balance: {} (post-debit: {})",
+                transactionId, accountNumber, amount, senderBalance, balanceAfterDebit);
 
         FraudCheckResult result= fraudDetectionEngine.performFraudChecks(accountNumber,amount,senderBalance);
 

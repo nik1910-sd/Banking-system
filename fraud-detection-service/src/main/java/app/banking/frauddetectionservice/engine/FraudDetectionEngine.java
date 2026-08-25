@@ -18,7 +18,7 @@ public class FraudDetectionEngine {
 
     private final RedisTemplate<String, String> redisTemplate;
 
-    @Value("${fruad.max-transactions-per-minute}")
+    @Value("${fraud.max-transactions-per-minute}")
     private int maxTransactionsPerMinute;
 
     @Value("${fraud.suspicious-amount-multiplier}")
@@ -45,7 +45,7 @@ public class FraudDetectionEngine {
                     "Unusual transaction amount -> exceeds 3x your average");
         }
 
-        if(senderBalance.compareTo(BigDecimal.ZERO)>0 && isBalanceCheckFailed(senderBalance, amount)){
+        if(isBalanceCheckFailed(senderBalance, amount)){
             return new FraudCheckResult(
                     true,
                     "Transaction exceed 90% of account balance");
@@ -95,11 +95,17 @@ public class FraudDetectionEngine {
     }
 
     private boolean isBalanceCheckFailed(BigDecimal senderBalance, BigDecimal amount) {
+
+        if(senderBalance.compareTo(BigDecimal.ZERO) <= 0){
+            // Nothing to compare against - let the balance rule abstain.
+            return false;
+        }
+
         BigDecimal maxAllowed = senderBalance.multiply(
                 BigDecimal.valueOf(maxBalancePercentage));
 
-        log.info("Balance check - amount: {} maxAllowed: {} suscpious: {}",
-                amount, maxAllowed, amount.compareTo(maxAllowed) > 0);
+        log.info("Balance check - amount: {} balance: {} maxAllowed: {} suspicious: {}",
+                amount, senderBalance, maxAllowed, amount.compareTo(maxAllowed) > 0);
 
         return amount.compareTo(maxAllowed) > 0;
 
