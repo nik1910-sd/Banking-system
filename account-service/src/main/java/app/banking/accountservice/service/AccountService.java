@@ -5,10 +5,6 @@ import app.banking.accountservice.dto.CreateAccountRequest;
 import app.banking.accountservice.entity.Account;
 import app.banking.accountservice.entity.AccountStatus;
 import app.banking.accountservice.entity.AccountType;
-import app.banking.accountservice.exception.AccountNotActiveException;
-import app.banking.accountservice.exception.AccountNotFoundException;
-import app.banking.accountservice.exception.DuplicateAccountException;
-import app.banking.accountservice.exception.InsufficientBalanceException;
 import app.banking.accountservice.repository.AccountRepository;
 import jakarta.validation.Valid;
 import lombok.*;
@@ -61,7 +57,7 @@ public class AccountService {
         log.info("Create account request for={}", request.getEmail());
 
         if(accountRepository.existsByEmail(request.getEmail())){
-            throw new DuplicateAccountException(request.getEmail());
+            throw new RuntimeException("account already exists"+request.getEmail());
         }
 
         Account account = Account.builder()
@@ -92,21 +88,21 @@ public class AccountService {
 
     public AccountResponse getAccount(String accountNumber) {
         Account account=accountRepository.findByAccountNumber(accountNumber)
-                .orElseThrow(()->new AccountNotFoundException(accountNumber));
+                .orElseThrow(()->new RuntimeException("Account not found"));
 
         return mapToResponse(account);
     }
 
     public BigDecimal getBalance(String accountNumber) {
         Account account=accountRepository.findByAccountNumber(accountNumber)
-                .orElseThrow(()->new AccountNotFoundException(accountNumber));
+                .orElseThrow(()->new RuntimeException("Account not found"));
 
         return account.getBalance();
     }
 
     public void blockAccount(String accountNumber) {
         Account account=accountRepository.findByAccountNumber(accountNumber)
-                .orElseThrow(()->new AccountNotFoundException(accountNumber));
+                .orElseThrow(()->new RuntimeException("Account not found"));
         account.setStatus(AccountStatus.BLOCKED);
         accountRepository.save(account);
         log.info("Account blocked: {}", account.getAccountNumber());
@@ -117,16 +113,16 @@ public class AccountService {
         log.info("deduct balance {} from account: {} ", amount, accountNumber);
 
         Account account=accountRepository.findByAccountNumber(accountNumber)
-                .orElseThrow(()->new AccountNotFoundException(accountNumber));
+                .orElseThrow(()->new RuntimeException("Account not found"));
 
         if(account.getStatus()!=AccountStatus.ACTIVE){
-            throw new AccountNotActiveException(accountNumber, account.getStatus());
+            throw new RuntimeException("account not active");
         }
 
         if(account.getBalance().compareTo(amount)<0){
-            throw new InsufficientBalanceException(
-                    accountNumber, account.getBalance(), amount);
+            throw new RuntimeException("account balance not enough");
         }
+
 
         account.setBalance(account.getBalance().subtract(amount));
         accountRepository.save(account);
@@ -137,7 +133,7 @@ public class AccountService {
         log.info("credit balance {} from account: {} ", amount, accountNumber);
 ;
         Account account=accountRepository.findByAccountNumber(accountNumber)
-                .orElseThrow(()->new AccountNotFoundException(accountNumber));
+                .orElseThrow(()->new RuntimeException("Account not found"));
 
         account.setBalance(account.getBalance().add(amount));
         accountRepository.save(account);
