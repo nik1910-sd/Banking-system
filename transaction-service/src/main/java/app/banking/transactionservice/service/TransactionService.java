@@ -44,12 +44,18 @@ public class TransactionService {
 
     public TransactionResponse transfer(TransferRequest request){
 
+
+
+
         log.info("SAGA START - Transfer: {} -> {} amount: {}",
                 request.getSenderAccountNumber(),
                 request.getReceiverAccountNumber(),
                 request.getAmount());
 
-        // SAGA STEP 1: Deduct from sender
+
+
+
+        // SAGA STEP 1: deduct the amount
         accountServiceClient.deductBalance(
                 request.getSenderAccountNumber(),
                 request.getAmount());
@@ -65,6 +71,8 @@ public class TransactionService {
 
         Transaction savedTransaction = transactionRepository.save(transaction);
         log.info("Transaction saved as PROCESSING: {}", savedTransaction.getId());
+
+
 
         // SAGA STEP - 2: Publish for fraud check
         TransactionInitiatedEvent event = new TransactionInitiatedEvent(
@@ -84,6 +92,9 @@ public class TransactionService {
     }
 
 
+
+
+
     public TransactionResponse getTransaction(String transactionId){
         return mapToResponse(transactionRepository
                 .findById(transactionId)
@@ -92,36 +103,42 @@ public class TransactionService {
                 )));
     }
 
+
+
+
     public List<TransactionResponse> getTransactionHistory(String accountNumber){
 
         return transactionRepository
-                .findBySenderAccountNumberOrderByCreatedAtDesc(accountNumber)
+                .findAllByAccountNumber(accountNumber)
                 .stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
-    public TransactionResponse verifyOTP(String transactionID, String otp){
-        log.info("OTP verification for the transaction: {}", transactionID);
 
-        Transaction transaction = transactionRepository.findById(transactionID)
+
+
+    public TransactionResponse verifyOTP(String transactionId, String otp){
+        log.info("OTP verification for the transaction: {}", transactionId);
+
+        Transaction transaction = transactionRepository.findById(transactionId)
                 .orElseThrow(() -> new RuntimeException(
-                        "Transaction not found "+transactionID
+                        "Transaction not found "+transactionId
                 ));
 
-        String otpKey = "verification:otp" + transactionID;
+        String otpKey = "verification:otp" + transactionId;
         String storedOtp = redisTemplate.opsForValue().get(otpKey);
 
         if(storedOtp == null){
             // OTP EXPIRED
-            log.warn("OTP expired for transaction: {}", transactionID);
+            log.warn("OTP expired for transaction: {}", transactionId);
             compensateTransaction(transaction, "OTP expired - transaction cancelled and amount refunded");
             return mapToResponse(transaction);
         }
 
         if(!storedOtp.equals(otp)){
             // BLOCK ACCOUNT AND REFUND
-            log.warn("Wrong OTP - blocking account and refunding: {}", transactionID);
+            log.warn("Wrong OTP - blocking account and refunding: {}", transactionId);
             redisTemplate.delete(otpKey);
             blockAccountAndCompensate(transaction,
                     "Wrong OTP entered - transaction cancelled, "+
@@ -131,11 +148,15 @@ public class TransactionService {
         }
 
         // OTP correct - complete transaction
-        log.info("OTP verified - completing transaction: {}", transactionID);
+        log.info("OTP verified - completing transaction: {}", transactionId);
         redisTemplate.delete(otpKey);
         completeTransaction(transaction);
         return mapToResponse(transaction);
     }
+
+
+
+
 
     private void compensateTransaction(Transaction transaction, String reason) {
 
@@ -167,6 +188,9 @@ public class TransactionService {
                 transaction.getAmount(), transaction.getSenderAccountNumber());
     }
 
+
+
+
     private void blockAccountAndCompensate(Transaction transaction, String reason){
 
         // Publish fraud.detected -> Account Service will block account
@@ -182,6 +206,9 @@ public class TransactionService {
         // SAGA COMPENSATION - refund Sender
         compensateTransaction(transaction, reason);
     }
+
+
+
 
     private void completeTransaction(Transaction transaction){
         transaction.setStatus(TransactionStatus.COMPLETED);
@@ -203,6 +230,10 @@ public class TransactionService {
     }
 
 
+
+
+
+
     public void processCleanResult(String transactionID){
 
         Transaction transaction = transactionRepository.findById(transactionID)
@@ -217,6 +248,8 @@ public class TransactionService {
 
         completeTransaction(transaction);
     }
+
+
 
 
     private TransactionResponse mapToResponse(Transaction transaction){

@@ -60,6 +60,7 @@ public class TransactionEventConsumer {
             // Store OTP in Redis - expires in 5 minutes
             String otpKey = "verification:otp" + transactionId;
             redisTemplate.opsForValue().set(otpKey, otp, OTP_EXPIRY_MINUTES, TimeUnit.MINUTES);
+            log.info("OTP stored — key: {}, value: {}, expiry: {} min", otpKey, otp, OTP_EXPIRY_MINUTES);
 
             // Update Status
             transaction.setStatus(TransactionStatus.PENDING_VERIFICATION);
