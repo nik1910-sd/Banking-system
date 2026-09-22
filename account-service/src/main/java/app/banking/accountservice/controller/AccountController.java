@@ -30,7 +30,13 @@ public class AccountController {
 
     @GetMapping("/{accountNumber}")
     public ResponseEntity<AccountResponse> getAccount(
-            @PathVariable String accountNumber){
+            @PathVariable String accountNumber,
+            @RequestHeader(value = "X-User-Email", required = false) String userEmail,
+            @RequestHeader(value = "X-User-Role", required = false) String userRole){
+
+        if (!"ADMIN".equals(userRole)) {
+            accountService.verifyOwnership(accountNumber, userEmail);
+        }
 
 
         return ResponseEntity.ok(accountService.getAccount(accountNumber));
@@ -38,7 +44,13 @@ public class AccountController {
 
     @GetMapping("/{accountNumber}/balance")
     public ResponseEntity<BigDecimal> getBalance(
-            @PathVariable String accountNumber){
+            @PathVariable String accountNumber,
+            @RequestHeader(value = "X-User-Email", required = false) String userEmail,
+            @RequestHeader(value = "X-User-Role", required = false) String userRole){
+
+        if (!"ADMIN".equals(userRole)) {
+            accountService.verifyOwnership(accountNumber, userEmail);
+        }
 
         return ResponseEntity.ok(accountService.getBalance(accountNumber));
     }

@@ -2,7 +2,7 @@ spring:
   application:
     name: account-service
   datasource:
-    url: jdbc:mysql://host.docker.internal:3306/account_db?createDatabaseIfNotExist=true
+    url: jdbc:mysql://localhost:3306/account_db?createDatabaseIfNotExist=true
     username: root
     password: root
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -14,7 +14,7 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect
   kafka:
-    bootstrap-servers: kafka:9092
+    bootstrap-servers: localhost:9092
     consumer:
       group-id: account-service-group
       enable-auto-commit: false

@@ -85,7 +85,7 @@ public class FraudDetectionEngine {
 
         boolean suspicious = amount.compareTo(threshold) > 0;
 
-        if(suspicious){
+        if(!suspicious){
             BigDecimal newAvg = avgAmount.add(amount)
                     .divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP);
 

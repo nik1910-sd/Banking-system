@@ -106,7 +106,7 @@ public class AccountService {
         return account.getBalance();
     }
 
-    private void verifyOwnership(String accountNumber, String requestingUserEmail) {
+    public void verifyOwnership(String accountNumber, String requestingUserEmail) {
         if (requestingUserEmail == null) {
             return; // Internal service call (no header) — allow
         }
