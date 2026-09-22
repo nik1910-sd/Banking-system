@@ -13,12 +13,14 @@ public interface AccountServiceClient {
 
     @PutMapping("/api/v1/accounts/{accountNumber}/deduct")
     String deductBalance(@PathVariable String accountNumber,
-                         @RequestParam BigDecimal amount);
+                         @RequestParam BigDecimal amount,
+                         @RequestParam(required = false) String idempotencyKey);
 
 
     @PutMapping("/api/v1/accounts/{accountNumber}/credit")
     String creditBalance(@PathVariable String accountNumber,
-                         @RequestParam BigDecimal amount);
+                         @RequestParam BigDecimal amount,
+                         @RequestParam(required = false) String idempotencyKey);
 
     @GetMapping("/api/v1/accounts/{accountNumber}/balance")
     BigDecimal getBalance(@PathVariable String accountNumber);

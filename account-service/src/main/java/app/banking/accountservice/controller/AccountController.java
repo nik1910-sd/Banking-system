@@ -32,6 +32,7 @@ public class AccountController {
     public ResponseEntity<AccountResponse> getAccount(
             @PathVariable String accountNumber){
 
+
         return ResponseEntity.ok(accountService.getAccount(accountNumber));
     }
 
@@ -42,11 +43,12 @@ public class AccountController {
         return ResponseEntity.ok(accountService.getBalance(accountNumber));
     }
 
-    @PutMapping("/{accountNumber}/block")
+    @PutMapping("/admin/{accountNumber}/block")
     public ResponseEntity<String> blockAccount(
-            @PathVariable String accountNumber){
+            @PathVariable String accountNumber,
+            @RequestParam(required = false) String idempotencyKey){
 
-        accountService.blockAccount(accountNumber);
+        accountService.blockAccount(accountNumber, idempotencyKey);
         return ResponseEntity.ok("Account blocked successfully");
     }
 
@@ -55,12 +57,13 @@ public class AccountController {
      * Called by Transaction Service when transfer is initiated.
      */
 
-    @PutMapping("/{accountNumber}/deduct")
+    @PutMapping("/admin/{accountNumber}/deduct")
     public ResponseEntity<String> deductBalance(
             @PathVariable String accountNumber,
-            @RequestParam BigDecimal amount){
+            @RequestParam BigDecimal amount,
+            @RequestParam(required = false) String idempotencyKey){
 
-        accountService.deductBalance(accountNumber,amount);
+        accountService.deductBalance(accountNumber,amount, idempotencyKey);
         return ResponseEntity.ok("Balance deducted successfully");
     }
 
@@ -71,11 +74,12 @@ public class AccountController {
      * 2.TRANSACTION COMPLETED->CREDIT RECEIVER
      */
 
-    @PutMapping("/{accountNumber}/credit")
+    @PutMapping("/admin/{accountNumber}/credit")
     public ResponseEntity<String>  creditBalance(
             @PathVariable String accountNumber,
-            @RequestParam BigDecimal amount){
-        accountService.creditBalance(accountNumber,amount);
+            @RequestParam BigDecimal amount,
+            @RequestParam(required = false) String idempotencyKey){
+        accountService.creditBalance(accountNumber, amount, idempotencyKey);
         return ResponseEntity.ok("Balance credited successfully");
     }
 

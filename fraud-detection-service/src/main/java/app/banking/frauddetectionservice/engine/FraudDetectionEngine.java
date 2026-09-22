@@ -57,7 +57,7 @@ public class FraudDetectionEngine {
     }
 
     private boolean isVelocityExceeded(String accountNumber) {
-        String key = "fraud:velocity" + accountNumber;
+        String key = "fraud:velocity:" + accountNumber;
         Long count = redisTemplate.opsForValue().increment(key);
 
         if(count != null && count == 1){
@@ -83,10 +83,14 @@ public class FraudDetectionEngine {
         BigDecimal threshold = avgAmount.multiply(
                 BigDecimal.valueOf(suspiciousAmountMultiplier));
 
-        BigDecimal newAvg = avgAmount.add(amount)
-                .divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP);
+        boolean suspicious = amount.compareTo(threshold) > 0;
 
-        redisTemplate.opsForValue().set(avgKey, newAvg.toString());
+        if(suspicious){
+            BigDecimal newAvg = avgAmount.add(amount)
+                    .divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP);
+
+            redisTemplate.opsForValue().set(avgKey, newAvg.toString());
+        }
 
         log.info("Amount check - amount: {} threshold: {} suspicious: {}",
                 amount, threshold, amount.compareTo(threshold) > 0);

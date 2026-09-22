@@ -45,27 +45,20 @@ public class TransactionService {
     public TransactionResponse transfer(TransferRequest request){
 
 
-
-
         log.info("SAGA START - Transfer: {} -> {} amount: {}",
                 request.getSenderAccountNumber(),
                 request.getReceiverAccountNumber(),
                 request.getAmount());
 
 
-
-
         // SAGA STEP 1: deduct the amount
-        accountServiceClient.deductBalance(
-                request.getSenderAccountNumber(),
-                request.getAmount());
 
         Transaction transaction = new Transaction();
         transaction.setSenderAccountNumber(request.getSenderAccountNumber());
         transaction.setReceiverAccountNumber(request.getReceiverAccountNumber());
         transaction.setAmount(request.getAmount());
         transaction.setType(TransactionType.TRANSFER);
-        transaction.setStatus(TransactionStatus.PROCESSING);
+        transaction.setStatus(TransactionStatus.PENDING);
         transaction.setDescription(request.getDescription());
         transaction.setReferenceNumber(UUID.randomUUID().toString());
 
@@ -73,22 +66,46 @@ public class TransactionService {
         log.info("Transaction saved as PROCESSING: {}", savedTransaction.getId());
 
 
+        try{
+            accountServiceClient.deductBalance(
+                    request.getSenderAccountNumber(),
+                    request.getAmount(),
+                    "transaction.debit:" + savedTransaction.getId());
 
-        // SAGA STEP - 2: Publish for fraud check
-        TransactionInitiatedEvent event = new TransactionInitiatedEvent(
-                savedTransaction.getId(),
-                savedTransaction.getSenderAccountNumber(),
-                savedTransaction.getReceiverAccountNumber(),
-                savedTransaction.getAmount(),
-                savedTransaction.getDescription()
-        );
+            savedTransaction.setStatus(TransactionStatus.PROCESSING);
+            transactionRepository.save(savedTransaction);
+
+            // SAGA STEP - 2: Publish for fraud check
+            TransactionInitiatedEvent event = new TransactionInitiatedEvent(
+                    savedTransaction.getId(),
+                    savedTransaction.getSenderAccountNumber(),
+                    savedTransaction.getReceiverAccountNumber(),
+                    savedTransaction.getAmount(),
+                    savedTransaction.getDescription()
+            );
 
 
-        kafkaTemplate.send(TRANSACTION_INITIATED_TOPIC, savedTransaction.getId(), event);
+            kafkaTemplate.send(TRANSACTION_INITIATED_TOPIC, savedTransaction.getId(), event);
 
-        log.info("SAGA STEP 2 - TransactionInitiatedEvent published: {}", savedTransaction.getId());
+            log.info("SAGA STEP 2 - TransactionInitiatedEvent published: {}", savedTransaction.getId());
+
+        }
+
+        catch(Exception e){
+            // 5. CATCH EXCEPTION: Mark as FAILED if deduction (e.g. low balance) or network fails
+            log.error("Failed to process transfer for transaction: {}", savedTransaction.getId(), e);
+
+            savedTransaction.setStatus(TransactionStatus.FAILED);
+            savedTransaction.setFailureReason("Failed to deduct balance: " + e.getMessage());
+            transactionRepository.save(savedTransaction);
+
+            // Re-throw the exception so the controller can return an HTTP error to the user
+            throw new RuntimeException("Transaction failed: " + e.getMessage());
+
+        }
 
         return mapToResponse(savedTransaction);
+
     }
 
 
@@ -126,7 +143,19 @@ public class TransactionService {
                         "Transaction not found "+transactionId
                 ));
 
-        String otpKey = "verification:otp" + transactionId;
+        if(transaction.getStatus() == TransactionStatus.COMPLETED
+                || transaction.getStatus() == TransactionStatus.FLAGGED){
+            log.info("Transaction {} already {}, skipping OTP",
+                    transactionId, transaction.getStatus());
+            return mapToResponse(transaction);
+        }
+
+        if(transaction.getStatus() != TransactionStatus.PENDING_VERIFICATION){
+            throw new RuntimeException(
+                    "Transaction is not waiting for OTP: "+transaction.getStatus());
+        }
+
+        String otpKey = "verification:otp:" + transactionId;
         String storedOtp = redisTemplate.opsForValue().get(otpKey);
 
         if(storedOtp == null){
@@ -160,6 +189,13 @@ public class TransactionService {
 
     private void compensateTransaction(Transaction transaction, String reason) {
 
+        if(transaction.getStatus() == TransactionStatus.FLAGGED
+                || transaction.getStatus() == TransactionStatus.COMPLETED){
+            log.info("Compensation already done for {}, status={}",
+                    transaction.getId(), transaction.getStatus());
+            return;
+        }
+
         log.warn("SAGA COMPENSATION - refunding: {} amount: {}",
                 transaction.getSenderAccountNumber(),
                 transaction.getAmount());
@@ -167,7 +203,8 @@ public class TransactionService {
         // CREDIT MONEY BACK TO SENDER SYNCHRONOUSLY
         accountServiceClient.creditBalance(
                 transaction.getSenderAccountNumber(),
-                transaction.getAmount());
+                transaction.getAmount(),
+                "transaction.refund:" + transaction.getId());
 
         transaction.setStatus(TransactionStatus.FLAGGED);
         transaction.setFailureReason(reason +
@@ -211,6 +248,11 @@ public class TransactionService {
 
 
     private void completeTransaction(Transaction transaction){
+        if(transaction.getStatus() == TransactionStatus.COMPLETED){
+            log.info("Transaction {} already COMPLETED - skip publish",
+                    transaction.getId());
+            return;
+        }
         transaction.setStatus(TransactionStatus.COMPLETED);
         transaction.setCompletedAt(LocalDateTime.now());
         transactionRepository.save(transaction);

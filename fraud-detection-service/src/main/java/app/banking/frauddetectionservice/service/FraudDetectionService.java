@@ -7,11 +7,13 @@ import app.banking.frauddetectionservice.event.TransactionCleanEvent;
 import app.banking.frauddetectionservice.event.VerificationEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 @Service
 @RequiredArgsConstructor
@@ -21,6 +23,7 @@ public class FraudDetectionService {
     private final AccountServiceClient accountServiceClient;
     private final KafkaTemplate<String,Object> kafkaTemplate;
     private final FraudDetectionEngine fraudDetectionEngine;
+    private final RedisTemplate<String, String> redisTemplate;
 
 
     private static final String VERIFICATION_REQUIRED_TOPIC = "verification.required";
@@ -31,6 +34,14 @@ public class FraudDetectionService {
         String transactionId = (String) payload.get("transactionId");
         String accountNumber = (String) payload.get("senderAccountNumber");
         BigDecimal amount = new BigDecimal(payload.get("amount").toString());
+
+        String processedKey = "idempotency:fraud:" + transactionId;
+        Boolean firstDelivery = redisTemplate.opsForValue()
+                .setIfAbsent(processedKey, "1", 7, TimeUnit.DAYS);
+        if (Boolean.FALSE.equals(firstDelivery)) {
+            log.info("Duplicate transaction.initiated {} — skip fraud check", transactionId);
+            return;
+        }
 
         // SAGA STEP 1 already debited the sender, so getBalance() returns the
         // post-debit figure. Add the amount back to recover the balance the

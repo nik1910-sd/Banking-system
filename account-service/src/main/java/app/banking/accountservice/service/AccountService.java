@@ -5,11 +5,16 @@ import app.banking.accountservice.dto.CreateAccountRequest;
 import app.banking.accountservice.entity.Account;
 import app.banking.accountservice.entity.AccountStatus;
 import app.banking.accountservice.entity.AccountType;
+import app.banking.accountservice.entity.ProcessedEvent;
 import app.banking.accountservice.repository.AccountRepository;
+import app.banking.accountservice.repository.ProcessedEventRepository;
 import jakarta.validation.Valid;
 import lombok.*;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.security.SecureRandom;
@@ -20,6 +25,7 @@ import java.security.SecureRandom;
 public class AccountService {
 
     private final AccountRepository accountRepository;
+    private final ProcessedEventRepository processedEventRepository;
     private static SecureRandom  random = new SecureRandom();
 
  //Generate unique 12 digit number
@@ -100,7 +106,26 @@ public class AccountService {
         return account.getBalance();
     }
 
-    public void blockAccount(String accountNumber) {
+    private void verifyOwnership(String accountNumber, String requestingUserEmail) {
+        if (requestingUserEmail == null) {
+            return; // Internal service call (no header) — allow
+        }
+
+        Account account = accountRepository.findByAccountNumber(accountNumber)
+                .orElseThrow(() -> new RuntimeException("Account not found"));
+
+        if (!account.getEmail().equals(requestingUserEmail)) {
+            throw new RuntimeException("Access denied — you can only access your own account");
+        }
+    }
+
+    @Transactional
+    public void blockAccount(String accountNumber, String idempotencyKey) {
+        if (!claimEvent(idempotencyKey, "ACCOUNT_BLOCK")) {
+            log.info("Duplicate block ignored for key={}", idempotencyKey);
+            return;
+        }
+
         Account account=accountRepository.findByAccountNumber(accountNumber)
                 .orElseThrow(()->new RuntimeException("Account not found"));
         account.setStatus(AccountStatus.BLOCKED);
@@ -108,11 +133,19 @@ public class AccountService {
         log.info("Account blocked: {}", account.getAccountNumber());
     }
 
-    public void deductBalance(String accountNumber, BigDecimal amount) {
+    @Transactional
+    public void deductBalance(String accountNumber, BigDecimal amount, String idempotencyKey) {
 
         log.info("deduct balance {} from account: {} ", amount, accountNumber);
 
-        Account account=accountRepository.findByAccountNumber(accountNumber)
+
+        // IDEMPOTENCY CHECK — prevent double-deduction on Feign retry
+        if (!claimEvent(idempotencyKey, "ACCOUNT_DEBIT")) {
+            log.info("Duplicate debit ignored for key={}", idempotencyKey);
+            return;
+        }
+
+        Account account=accountRepository.findByAccountNumberForUpdate(accountNumber)
                 .orElseThrow(()->new RuntimeException("Account not found"));
 
         if(account.getStatus()!=AccountStatus.ACTIVE){
@@ -129,15 +162,46 @@ public class AccountService {
         log.info("Balance updated. New balance: {}", account.getBalance());
     }
 
-    public void creditBalance(String accountNumber, BigDecimal amount) {
-        log.info("credit balance {} from account: {} ", amount, accountNumber);
-;
+    @Transactional
+    public void creditBalance(String accountNumber, BigDecimal amount, String idempotencyKey) {
+        log.info("credit balance {} to account: {} key={}", amount, accountNumber, idempotencyKey);
+
+        if (!claimEvent(idempotencyKey, "ACCOUNT_CREDIT")) {
+            log.info("Duplicate credit ignored for key={}", idempotencyKey);
+            return;
+        }
+
         Account account=accountRepository.findByAccountNumber(accountNumber)
                 .orElseThrow(()->new RuntimeException("Account not found"));
 
         account.setBalance(account.getBalance().add(amount));
         accountRepository.save(account);
         log.info("Credit balance updated. New balance: {}", account.getBalance());
+    }
+
+    /**
+     * Insert the event key in the SAME DB transaction as the money change.
+     * If Kafka redelivers after a crash (offset not committed), the unique
+     * constraint fails and we skip — no second credit.
+     * If the credit itself fails, this insert rolls back so Kafka can retry.
+     */
+    private boolean claimEvent(String idempotencyKey, String eventType) {
+        if (!StringUtils.hasText(idempotencyKey)) {
+            return true;
+        }
+        if (processedEventRepository.existsByEventKey(idempotencyKey)) {
+            return false;
+        }
+        try {
+            processedEventRepository.saveAndFlush(ProcessedEvent.builder()
+                    .eventKey(idempotencyKey)
+                    .eventType(eventType)
+                    .build());
+            return true;
+        } catch (DataIntegrityViolationException duplicate) {
+            log.info("Lost the race claiming key={}, treating as duplicate", idempotencyKey);
+            return false;
+        }
     }
 
 }

@@ -1,7 +1,139 @@
 version: '3.8'
 
 services:
+  registry-service:
+    image: 341860778277.dkr.ecr.ap-south-1.amazonaws.com/registry-service:latest
+    container_name: registry-service
+    ports:
+      - "8761:8761"
+    restart: unless-stopped
+    networks:
+      - banking-network
 
+  api-gateway-service:
+    image: 341860778277.dkr.ecr.ap-south-1.amazonaws.com/api-gateway-service:latest
+    container_name: api-gateway-service
+    ports:
+      - "8088:8088"
+    environment:
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://registry-service:8761/eureka/
+    depends_on:
+      - registry-service
+    restart: unless-stopped
+    networks:
+      - banking-network
+
+  auth-service:
+    build: ./auth-service
+    container_name: auth-service
+    ports:
+      - "8089:8089"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/auth_db?createDatabaseIfNotExist=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://registry-service:8761/eureka/
+    depends_on:
+      - registry-service
+      - mysql
+    restart: unless-stopped
+    networks:
+      - banking-network
+
+  account-service:
+    image: 341860778277.dkr.ecr.ap-south-1.amazonaws.com/account-service:latest
+    container_name: account-service
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/account_db?createDatabaseIfNotExist=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://registry-service:8761/eureka/
+    depends_on:
+      - registry-service
+      - mysql
+    restart: unless-stopped
+    networks:
+      - banking-network
+
+  transaction-service:
+    image: 341860778277.dkr.ecr.ap-south-1.amazonaws.com/transaction-service:latest
+    container_name: transaction-service
+    ports:
+      - "8082:8082"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/transaction_db?createDatabaseIfNotExist=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SPRING_DATA_REDIS_HOST: redis
+      ACCOUNT_SERVICE_URL: http://account-service:8081
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://registry-service:8761/eureka/
+    depends_on:
+      - registry-service
+      - mysql
+      - kafka
+      - redis
+      - account-service
+    restart: unless-stopped
+    networks:
+      - banking-network
+
+  payment-service:
+    image: 341860778277.dkr.ecr.ap-south-1.amazonaws.com/payment-service:latest
+    container_name: payment-service
+    ports:
+      - "8083:8083"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/payment_db?createDatabaseIfNotExist=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET}
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://registry-service:8761/eureka/
+    depends_on:
+      - registry-service
+      - mysql
+      - kafka
+    restart: unless-stopped
+    networks:
+      - banking-network
+
+  fraud-detection-service:
+    image: 341860778277.dkr.ecr.ap-south-1.amazonaws.com/fraud-detection-service:latest
+    container_name: fraud-detection-service
+    ports:
+      - "8084:8084"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/fraud_db?createDatabaseIfNotExist=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://registry-service:8761/eureka/
+    depends_on:
+      - registry-service
+      - mysql
+      - kafka
+    restart: unless-stopped
+    networks:
+      - banking-network
+
+  notification-service:
+    image: 341860778277.dkr.ecr.ap-south-1.amazonaws.com/notification-service:latest
+    container_name: notification-service
+    ports:
+      - "8085:8085"
+    environment:
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://registry-service:8761/eureka/
+    depends_on:
+      - registry-service
+      - kafka
+    restart: unless-stopped
+    networks:
+      - banking-network
 
   redis:
     image: redis:latest
@@ -15,7 +147,7 @@ services:
     image: mysql:8.0
     container_name: mysql
     environment:
-      MYSQL_ROOT_PASSWORD: root
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
     ports:
       - "3306:3306"
     volumes:
@@ -31,7 +163,6 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
     networks:
       - banking-network
-
 
   kafka:
     image: confluentinc/cp-kafka:7.4.0

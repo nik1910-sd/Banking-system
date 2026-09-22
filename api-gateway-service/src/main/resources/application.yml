@@ -3,11 +3,17 @@ spring:
     name: api-gateway-service
   data:
     redis:
-      host: localhost
+      host: redis
       port: 6379
   cloud:
     gateway:
       routes:
+
+        # Auth Service Routes
+        - id: auth-service
+          uri: lb://auth-service
+          predicates:
+            - Path=/api/v1/auth/**
 
         # Account Service Routes
         - id: account-service
@@ -15,6 +21,7 @@ spring:
           predicates:
             - Path=/api/v1/accounts/**
           filters:
+            - AuthenticationFilter
             - name: RequestRateLimiter
               args:
                 redis-rate-limiter.replenishRate: 10
@@ -26,6 +33,7 @@ spring:
           predicates:
             - Path=/api/v1/transactions/**
           filters:
+            - AuthenticationFilter
             - name: RequestRateLimiter
               args:
                 redis-rate-limiter.replenishRate: 10
@@ -37,10 +45,14 @@ spring:
           predicates:
             - Path=/api/v1/payments/**
           filters:
+            - AuthenticationFilter
             - name: RequestRateLimiter
               args:
                 redis-rate-limiter.replenishRate: 5
                 redis-rate-limiter.burstCapacity: 10
+
+jwt:
+  secret: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
 
   main:
    web-application-type: REACTIVE
@@ -49,8 +61,6 @@ eureka:
   client:
    register-with-eureka: true
    fetch-registry: true
-   service-url:
-    defaultZone: http://localhost:8761/eureka/
   instance:
     prefer-ip-address: true
 
