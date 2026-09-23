@@ -31,7 +31,7 @@ public class TransactionService {
     private final TransactionRepository transactionRepository;
     private final AccountServiceClient accountServiceClient;
 
-    private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final OutboxService outboxService;
     private final RedisTemplate<String, String> redisTemplate;
 
 
@@ -85,7 +85,7 @@ public class TransactionService {
             );
 
 
-            kafkaTemplate.send(TRANSACTION_INITIATED_TOPIC, savedTransaction.getId(), event);
+            outboxService.saveEvent(TRANSACTION_INITIATED_TOPIC, savedTransaction.getId(), event);
 
             log.info("SAGA STEP 2 - TransactionInitiatedEvent published: {}", savedTransaction.getId());
 
@@ -219,7 +219,7 @@ public class TransactionService {
         refundEvent.put("amount", transaction.getAmount());
         refundEvent.put("reason", reason);
 
-        kafkaTemplate.send(TRANSACTION_REFUNDED_TOPIC, transaction.getId(), refundEvent);
+        outboxService.saveEvent(TRANSACTION_REFUNDED_TOPIC, transaction.getId(), refundEvent);
 
         log.info("SAGA COMPENSATION COMPLETE - {} refunded to  {}",
                 transaction.getAmount(), transaction.getSenderAccountNumber());
@@ -236,7 +236,7 @@ public class TransactionService {
         fraudEvent.put("senderAccountNumber", transaction.getSenderAccountNumber());
         fraudEvent.put("reason", reason);
 
-        kafkaTemplate.send(FRAUD_DETECTED_TOPIC, transaction.getSenderAccountNumber(), fraudEvent);
+        outboxService.saveEvent(FRAUD_DETECTED_TOPIC, transaction.getSenderAccountNumber(), fraudEvent);
         log.warn("fraud.detected published - account: {} will be blocked, Kindly contact to the bank",
                 transaction.getSenderAccountNumber());
 
@@ -265,7 +265,7 @@ public class TransactionService {
                 transaction.getDescription()
         );
 
-        kafkaTemplate.send(TRANSACTION_COMPLETED_TOPIC, transaction.getId(), completedEvent);
+        outboxService.saveEvent(TRANSACTION_COMPLETED_TOPIC, transaction.getId(), completedEvent);
 
         log.info("SAGA COMPLETE - Transaction {} completed",
                 transaction.getId());

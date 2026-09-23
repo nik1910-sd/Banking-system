@@ -1,8 +1,8 @@
 spring:
   application:
-    name: transaction-service
+    name: fraud-detection-service
   datasource:
-    url: jdbc:mysql://localhost:3306/transaction_db?createDatabaseIfNotExist=true
+    url: jdbc:mysql://localhost:3306/frauddetection_db?createDatabaseIfNotExist=true
     username: root
     password: root
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -13,40 +13,35 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
   kafka:
     bootstrap-servers: localhost:9092
     consumer:
-      group-id: transaction-service-group
+      group-id: fraud-detection-group
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
       properties:
         spring:
           json:
-            trusted:
-              packages: "*"
-            use:
-              type:
-                headers: false
-            value:
-              default:
-                type: java.util.HashMap
+            trusted.packages: "*"
+            use.type.headers: false
+            value.default.type: java.util.HashMap
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
-  data:
-    redis:
-      host: localhost
-      port: 6379
 
 server:
-  port: 8082
+  port: 8084
 
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info
+fraud:
+  max-transactions-per-minute: 5
+  suspicious-amount-multiplier: 3.0
+  max-balance-percentage: 0.90
 
 eureka:
   client:
@@ -54,3 +49,9 @@ eureka:
     fetch-registry: true
   instance:
     prefer-ip-address: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info

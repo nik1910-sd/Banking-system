@@ -139,7 +139,7 @@ public class AccountService {
         log.info("deduct balance {} from account: {} ", amount, accountNumber);
 
 
-        // IDEMPOTENCY CHECK — prevent double-deduction on Feign retry
+        // IDEMPOTENCY CHECK
         if (!claimEvent(idempotencyKey, "ACCOUNT_DEBIT")) {
             log.info("Duplicate debit ignored for key={}", idempotencyKey);
             return;

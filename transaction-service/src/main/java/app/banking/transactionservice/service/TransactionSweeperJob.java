@@ -22,7 +22,7 @@ public class TransactionSweeperJob {
 
     private final TransactionRepository transactionRepository;
     private final AccountServiceClient accountServiceClient;
-    private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final OutboxService outboxService;
 
     private static final String TRANSACTION_REFUNDED_TOPIC = "transaction.refunded";
 
@@ -90,7 +90,7 @@ public class TransactionSweeperJob {
             refundEvent.put("senderAccountNumber", txn.getSenderAccountNumber());
             refundEvent.put("amount", txn.getAmount());
             refundEvent.put("reason", reason);
-            kafkaTemplate.send(TRANSACTION_REFUNDED_TOPIC, txn.getId(), refundEvent);
+            outboxService.saveEvent(TRANSACTION_REFUNDED_TOPIC, txn.getId(), refundEvent);
 
             log.info("SWEEPER - refund complete for transaction: {}", txn.getId());
 

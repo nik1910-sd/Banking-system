@@ -27,7 +27,7 @@ public class TransactionEventConsumer {
     private final TransactionService transactionService;
     private static final long OTP_EXPIRY_MINUTES = 5;
 
-    private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final OutboxService outboxService;
 
     private static final String TRANSACTION_OTP_GENERATED_TOPIC = "transaction.otp.generated";
 
@@ -77,7 +77,7 @@ public class TransactionEventConsumer {
             otpEvent.put("otp", otp);
             otpEvent.put("amount", payload.get("amount"));
 
-            kafkaTemplate.send(TRANSACTION_OTP_GENERATED_TOPIC, transactionId, otpEvent);
+            outboxService.saveEvent(TRANSACTION_OTP_GENERATED_TOPIC, transactionId, otpEvent);
 
         }
         catch(Exception e){
